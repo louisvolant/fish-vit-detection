@@ -1,6 +1,8 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, UnidentifiedImageError
 
@@ -53,6 +55,16 @@ class TestScanCore(unittest.TestCase):
         self.assertEqual(common, "Anna's Chromodoris")
         self.assertEqual(family, "Chromodorididae")
 
+    def test_select_best_taxon_match_prefers_exact_species_over_complex(self) -> None:
+        results = [
+            {"id": 1599546, "name": "Amphiprion percula", "rank": "complex"},
+            {"id": 132688, "name": "Amphiprion ocellaris", "rank": "species"},
+        ]
+        chosen = scan.INaturalistTaxonomyResolver._select_best_taxon_match(
+            results, "Amphiprion ocellaris"
+        )
+        self.assertEqual(chosen["id"], 132688)
+
     def test_format_prediction_entry(self) -> None:
         result = scan.ImagePredictionResult(
             rel_path="bunaken/clownfish.jpg",
@@ -103,10 +115,11 @@ class TestScanCore(unittest.TestCase):
         self.assertAlmostEqual(preds[0].confidence, 94.2)
 
     def test_api_classifiers_require_api_key(self) -> None:
-        with self.assertRaises(RuntimeError):
-            scan.GeminiVisionClassifier(api_key=None)
-        with self.assertRaises(RuntimeError):
-            scan.OpenAIVisionClassifier(api_key=None)
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(RuntimeError):
+                scan.GeminiVisionClassifier(api_key=None)
+            with self.assertRaises(RuntimeError):
+                scan.OpenAIVisionClassifier(api_key=None)
 
     def test_parse_existing_detection_md_and_resume_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

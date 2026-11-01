@@ -17,8 +17,10 @@ The repository is named **`fish-vit-detection`** because its local inference eng
 2. **Convolutional Neural Network (`--model cnn`)**:
    - Uses [`timm/convnext_large_mlp.laion2b_ft_augreg_inat21`](https://huggingface.co/timm/convnext_large_mlp.laion2b_ft_augreg_inat21) (ConvNeXt-Large).
    - Applies hierarchical sliding convolutional filters to capture fine-grained local textures, scale patterns, mantle tubercles, and color gradients.
-3. **Hardware Acceleration on Apple Silicon (`mps`)**:
-   - Both ViT and CNN backbones execute directly on the Apple Silicon GPU via PyTorch's Metal Performance Shaders (`mps`) backend, with smart in-memory image resizing to keep unified memory usage low.
+3. **Hardware Acceleration on Apple Silicon (`mps`) & Zero API Key Required**:
+   - Both ViT and CNN backbones are open-weight checkpoints hosted publicly on Hugging Face. On first run, `timm` caches the model locally in `~/.cache/huggingface/hub/` and executes inference 100% locally on the Apple Silicon GPU (`mps`).
+   - All 10,000 scientific names and default descriptions are bundled inside the model's `config.json`.
+   - Localized common names and taxonomic families (`Pomacentridae`, `Chromodorididae`, etc.) are fetched on the fly from the **free public iNaturalist v1 REST API** (`GET https://api.inaturalist.org/v1/taxa`, which requires no authentication or API key) and cached in memory. If offline, use `--offline-taxonomy` to rely solely on bundled metadata.
 
 ---
 

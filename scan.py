@@ -290,6 +290,21 @@ class INaturalistTaxonomyResolver:
         self.locale = locale
         self._cache: Dict[Tuple[str, str], Tuple[str, str]] = {}
 
+    @staticmethod
+    def _select_best_taxon_match(results: List[ dict ], scientific_name: str) -> dict:
+        """
+        Prefer an exact case-insensitive match on `scientific_name` (and rank 'species')
+        over broader species complexes returned by iNaturalist's fuzzy search.
+        """
+        target = scientific_name.strip().lower()
+        for item in results:
+            if str(item.get("name", "")).strip().lower() == target and item.get("rank") == "species":
+                return item
+        for item in results:
+            if str(item.get("name", "")).strip().lower() == target:
+                return item
+        return results[0]
+
     def resolve(self, scientific_name: str, fallback_desc: str = "") -> Tuple[str, str]:
         """Return `(common_name, family)` for a given `scientific_name`."""
         cache_key = (scientific_name, self.locale)
@@ -308,7 +323,7 @@ class INaturalistTaxonomyResolver:
 
         try:
             query = urllib.parse.urlencode(
-                {"q": scientific_name, "per_page": 1, "locale": self.locale}
+                {"q": scientific_name, "per_page": 10, "locale": self.locale}
             )
             url = f"https://api.inaturalist.org/v1/taxa?{query}"
             req = urllib.request.Request(
@@ -323,7 +338,7 @@ class INaturalistTaxonomyResolver:
                 self._cache[cache_key] = (fallback_common, fallback_family)
                 return fallback_common, fallback_family
 
-            taxon = results[0]
+            taxon = self._select_best_taxon_match(results, scientific_name)
             common_name = (
                 taxon.get("preferred_common_name")
                 or taxon.get("english_common_name")
@@ -428,11 +443,42 @@ class LocalTimmINatClassifier(BaseClassifier):
         pretrained_cfg = getattr(self.model, "pretrained_cfg", {}) or {}
         self.label_names: List[str] = pretrained_cfg.get("label_names", [])
         self.label_descriptions: Dict[str, str] = pretrained_cfg.get("label_descriptions", {})
+        if not self.label_names:
+            self.label_names, self.label_descriptions = self._load_hf_config_labels(model_name)
 
         self.taxonomy_resolver = INaturalistTaxonomyResolver(
             enabled=enrich_taxonomy,
             locale=locale,
         )
+
+    @staticmethod
+    def _load_hf_config_labels(model_name: str) -> Tuple[List[str], Dict[str, str]]:
+        """
+        Load `label_names` and `label_descriptions` directly from the cached Hugging Face
+        `config.json` if `timm` did not populate them in `model.pretrained_cfg`.
+        """
+        repo_id = model_name
+        if repo_id.startswith("hf-hub:"):
+            repo_id = repo_id.split("hf-hub:", 1)[1]
+        elif repo_id.startswith("hf_hub:"):
+            repo_id = repo_id.split("hf_hub:", 1)[1]
+
+        if "/" not in repo_id:
+            return [], {}
+
+        try:
+            from huggingface_hub import hf_hub_download
+
+            cfg_path = hf_hub_download(repo_id=repo_id, filename="config.json")
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg_data = json.load(f)
+            return (
+                cfg_data.get("label_names", []) or [],
+                cfg_data.get("label_descriptions", {}) or {},
+            )
+        except Exception as exc:
+            logger.debug("Could not load config.json labels from Hugging Face Hub: %s", exc)
+            return [], {}
 
     def predict(self, img: Image.Image, top_k: int = 5) -> List[SpeciesHypothesis]:
         tensor = self.transforms(img).unsqueeze(0).to(self.device)
