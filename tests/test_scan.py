@@ -225,6 +225,56 @@ class TestScanCore(unittest.TestCase):
             "hf-hub:timm/custom_model",
         )
 
+    def test_oneline_format_and_resume_parsing(self) -> None:
+        rel_name = "2026-07-16_09-17-18 - TG-7 - Sulawesi - Plongée sur Lembeh - Angels Window 11.jpeg"
+        result = scan.ImagePredictionResult(
+            rel_path=rel_name,
+            hypotheses=[
+                scan.SpeciesHypothesis(
+                    scientific_name="Triaenodon obesus",
+                    common_name="Requin-corail",
+                    family="Carcharhinidae",
+                    confidence=38.2,
+                ),
+                scan.SpeciesHypothesis(
+                    scientific_name="Carcharias taurus",
+                    common_name="Requin-taureau",
+                    family="Carchariidae",
+                    confidence=21.0,
+                ),
+                scan.SpeciesHypothesis(
+                    scientific_name="Zanclus cornutus",
+                    common_name="Idole maure",
+                    family="Zanclidae",
+                    confidence=4.2,
+                ),
+            ],
+        )
+        line = scan.format_prediction_entry(result, lang="fr", oneline=True)
+        expected = (
+            f"{rel_name} : **[Triaenodon obesus]** (*Requin-corail*) "
+            "(**Famille taxonomique:** `Carcharhinidae`) — **Confiance: 38.2%** / "
+            "**Alternatives:** *Carcharias taurus* (Requin-taureau, Carchariidae — 21.0%)\n"
+        )
+        self.assertEqual(line, expected)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = Path(tmpdir)
+            md_path = folder / "DETECTION.md"
+            header = scan.build_markdown_header(folder, "TestModel", 2, lang="fr")
+            low_line = scan.format_prediction_entry(
+                scan.ImagePredictionResult(rel_path="sub/blurry.jpg", hypotheses=[]),
+                lang="fr",
+                oneline=True,
+            )
+            md_path.write_text(header + line + low_line, encoding="utf-8")
+
+            processed = scan.parse_existing_detection_md(md_path)
+            self.assertEqual(processed, {rel_name, "sub/blurry.jpg"})
+
+        args = scan.parse_args(["--folder", "/tmp/photos", "--oneline"])
+        self.assertTrue(args.oneline)
+
 
 if __name__ == "__main__":
     unittest.main()

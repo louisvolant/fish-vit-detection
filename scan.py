@@ -717,12 +717,13 @@ class OpenAIVisionClassifier(BaseClassifier):
 # ==============================================================================
 
 ENTRY_HEADER_REGEX = re.compile(r"^###\s+📷\s+`([^`]+)`\s*$", re.MULTILINE)
+ONELINE_ENTRY_REGEX = re.compile(r"^([^\n#-][^\n]*?)\s+:\s+(?:\*\*\[|⚠️)", re.MULTILINE)
 
 
 def parse_existing_detection_md(md_path: Path) -> Set[str]:
     """
     Read an existing `DETECTION.md` file and extract the set of relative image
-    paths that have already been processed.
+    paths that have already been processed (supports both multi-line and --oneline formats).
     """
     if not md_path.exists():
         return set()
@@ -733,7 +734,9 @@ def parse_existing_detection_md(md_path: Path) -> Set[str]:
         logger.warning("Unable to read %s: %s", md_path, exc)
         return set()
 
-    return set(ENTRY_HEADER_REGEX.findall(content))
+    processed = set(ENTRY_HEADER_REGEX.findall(content))
+    processed.update(m.strip() for m in ONELINE_ENTRY_REGEX.findall(content))
+    return processed
 
 
 def build_markdown_header(
@@ -787,12 +790,40 @@ def format_prediction_entry(
     result: ImagePredictionResult,
     lang: str = DEFAULT_LANGUAGE,
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+    oneline: bool = False,
 ) -> str:
     """
-    Format a single image prediction result as a localized Markdown section.
+    Format a single image prediction result as a localized Markdown section
+    (or as a compact single line when `oneline=True`).
     Hypotheses strictly below `min_confidence` (default 5.0%) are excluded.
     """
     tr = get_translations(lang)
+
+    if oneline:
+        if result.error:
+            return f"{result.rel_path} : ⚠️ **{tr['error_label']}:** `{result.error}`\n"
+
+        valid_hypotheses = filter_hypotheses_by_confidence(
+            result.hypotheses,
+            min_confidence=min_confidence,
+        )
+        if not valid_hypotheses:
+            return f"{result.rel_path} : ⚠️ {tr['no_hypotheses']} (< {min_confidence:.1f}%)\n"
+
+        top1 = valid_hypotheses[0]
+        line = (
+            f"{result.rel_path} : **[{top1.scientific_name}]** (*{top1.common_name}*) "
+            f"(**{tr['family_label']}:** `{top1.family}`) — "
+            f"**{tr['confidence_label']}: {top1.confidence:.1f}%**"
+        )
+        if len(valid_hypotheses) > 1:
+            alts = [
+                f"*{h.scientific_name}* ({h.common_name}, {h.family} — {h.confidence:.1f}%)"
+                for h in valid_hypotheses[1:]
+            ]
+            line += f" / **{tr['alternatives_label']}:** {', '.join(alts)}"
+        return line + "\n"
+
     lines = [f"### 📷 `{result.rel_path}`", ""]
 
     if result.error:
@@ -929,6 +960,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         type=int,
         default=1024,
         help="Maximum image dimension (px) when resizing in memory before inference.",
+    )
+    parser.add_argument(
+        "--oneline",
+        action="store_true",
+        help="Write each image prediction on a single compact line in DETECTION.md.",
     )
     parser.add_argument(
         "--offline-taxonomy",
@@ -1120,6 +1156,7 @@ def main() -> None:
             result,
             lang=lang,
             min_confidence=args.min_confidence,
+            oneline=args.oneline,
         )
         with output_md.open("a", encoding="utf-8") as f:
             f.write(entry_markdown)

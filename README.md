@@ -92,14 +92,17 @@ pip install -r requirements.txt
 # 1. Local Mode with Vision Transformer (ViT, default) on Apple Silicon MPS
 python scan.py --folder /path/to/underwater/photos --mode local --model vit
 
-# 2. Local Mode with Convolutional Neural Network (ConvNeXt CNN) and French report
+# 2. Local Mode with compact single-line format (--oneline) and French output
+python scan.py --folder /path/to/underwater/photos --mode local --lang fr --oneline
+
+# 3. Local Mode with Convolutional Neural Network (ConvNeXt CNN) and French report
 python scan.py --folder /path/to/underwater/photos --mode local --model cnn --lang fr
 
-# 3. Gemini Flash Vision API Mode (North Sulawesi context, French output)
+# 4. Gemini Flash Vision API Mode (North Sulawesi context, French output)
 export GEMINI_API_KEY="your_api_key"
 python scan.py --folder /path/to/underwater/photos --mode gemini --lang fr
 
-# 4. OpenAI Vision API Mode (GPT-4o-mini / GPT-4o, interactive existing policy)
+# 5. OpenAI Vision API Mode (GPT-4o-mini / GPT-4o, interactive existing policy)
 export OPENAI_API_KEY="your_api_key"
 python scan.py --folder /path/to/underwater/photos --mode openai --existing ask --lang en
 ```
@@ -112,6 +115,7 @@ python scan.py --folder /path/to/underwater/photos --mode openai --existing ask 
 | `--mode`, `-m` | `local` | Inference engine: `local` (PyTorch MPS), `gemini`, or `openai`. |
 | `--model` | `vit` / auto | Architecture preset (`vit`, `cnn`) in `local` mode, or custom model ID. |
 | `--lang`, `-l` | `en` | Output language for `DETECTION.md` and species common names (`en`, `fr`, `id`, `es`, `de`, etc.). |
+| `--oneline` | `False` | Write each image prediction on a single compact line in `DETECTION.md`. |
 | `--existing` | `resume` | Policy when `DETECTION.md` exists: `resume`, `overwrite`, `ask`, or `skip`. |
 | `--overwrite` | `False` | Shorthand for `--existing overwrite`. |
 | `--top-k` | `5` | Maximum number of species hypotheses evaluated per image. |
