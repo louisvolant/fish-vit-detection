@@ -37,28 +37,165 @@ SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 DEFAULT_LOCAL_MODEL = "hf-hub:timm/eva02_large_patch14_clip_336.merged2b_ft_inat21"
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+DEFAULT_LANGUAGE = "en"
 
-SYSTEM_PROMPT_SULAWESI = """You are a world-renowned marine biologist specializing in the Indo-Pacific region, specifically North Sulawesi (Lembeh Strait muck diving and Bunaken National Park coral reefs).
+LANGUAGE_NAMES: Dict[str, str] = {
+    "en": "English",
+    "fr": "French",
+    "id": "Indonesian",
+    "es": "Spanish",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "nl": "Dutch",
+    "ja": "Japanese",
+    "zh": "Chinese",
+}
+
+REPORT_TRANSLATIONS: Dict[str, Dict[str, str]] = {
+    "en": {
+        "title": "🐠 Underwater Species Identification Report — North Sulawesi (Lembeh & Bunaken)",
+        "date_label": "Last analysis date",
+        "folder_label": "Analyzed folder",
+        "model_label": "Model used",
+        "lang_label": "Report language",
+        "total_label": "Total images detected",
+        "error_label": "Analysis error",
+        "no_hypotheses": "No hypotheses returned by the model.",
+        "top1_label": "Top 1",
+        "confidence_label": "Confidence",
+        "family_label": "Taxonomic family",
+        "alternatives_label": "Alternatives",
+        "col_rank": "Rank",
+        "col_scientific": "Scientific Name",
+        "col_common": "Common Name",
+        "col_family": "Family",
+        "col_confidence": "Confidence",
+        "unknown": "Unknown",
+    },
+    "fr": {
+        "title": "🐠 Rapport d'Identification Sous-Marine — Sulawesi Nord (Lembeh & Bunaken)",
+        "date_label": "Date de dernière analyse",
+        "folder_label": "Dossier analysé",
+        "model_label": "Modèle utilisé",
+        "lang_label": "Langue du rapport",
+        "total_label": "Nombre total d'images détectées",
+        "error_label": "Erreur d'analyse",
+        "no_hypotheses": "Aucune hypothèse retournée par le modèle.",
+        "top1_label": "Top 1",
+        "confidence_label": "Confiance",
+        "family_label": "Famille taxonomique",
+        "alternatives_label": "Alternatives",
+        "col_rank": "Rang",
+        "col_scientific": "Nom scientifique",
+        "col_common": "Nom vernaculaire",
+        "col_family": "Famille",
+        "col_confidence": "Confiance",
+        "unknown": "Non renseigné",
+    },
+    "id": {
+        "title": "🐠 Laporan Identifikasi Spesies Bawah Air — Sulawesi Utara (Lembeh & Bunaken)",
+        "date_label": "Tanggal analisis terakhir",
+        "folder_label": "Folder yang dianalisis",
+        "model_label": "Model yang digunakan",
+        "lang_label": "Bahasa laporan",
+        "total_label": "Total gambar terdeteksi",
+        "error_label": "Kesalahan analisis",
+        "no_hypotheses": "Tidak ada hipotesis yang dikembalikan oleh model.",
+        "top1_label": "Top 1",
+        "confidence_label": "Keyakinan",
+        "family_label": "Famili taksonomi",
+        "alternatives_label": "Alternatif",
+        "col_rank": "Peringkat",
+        "col_scientific": "Nama Ilmiah",
+        "col_common": "Nama Umum",
+        "col_family": "Famili",
+        "col_confidence": "Keyakinan",
+        "unknown": "Tidak diketahui",
+    },
+    "es": {
+        "title": "🐠 Informe de Identificación Submarina — Célebes Septentrional (Lembeh y Bunaken)",
+        "date_label": "Fecha del último análisis",
+        "folder_label": "Carpeta analizada",
+        "model_label": "Modelo utilizado",
+        "lang_label": "Idioma del informe",
+        "total_label": "Total de imágenes detectadas",
+        "error_label": "Error de análisis",
+        "no_hypotheses": "El modelo no devolvió ninguna hipótesis.",
+        "top1_label": "Top 1",
+        "confidence_label": "Confianza",
+        "family_label": "Familia taxonómica",
+        "alternatives_label": "Alternativas",
+        "col_rank": "Rango",
+        "col_scientific": "Nombre científico",
+        "col_common": "Nombre común",
+        "col_family": "Familia",
+        "col_confidence": "Confianza",
+        "unknown": "Desconocido",
+    },
+    "de": {
+        "title": "🐠 Unterwasser-Artenbestimmungsbericht — Nord-Sulawesi (Lembeh & Bunaken)",
+        "date_label": "Datum der letzten Analyse",
+        "folder_label": "Analysierter Ordner",
+        "model_label": "Verwendetes Modell",
+        "lang_label": "Berichtssprache",
+        "total_label": "Gesamtzahl erkannter Bilder",
+        "error_label": "Analysefehler",
+        "no_hypotheses": "Keine Hypothesen vom Modell zurückgegeben.",
+        "top1_label": "Top 1",
+        "confidence_label": "Konfidenz",
+        "family_label": "Taxonomische Familie",
+        "alternatives_label": "Alternativen",
+        "col_rank": "Rang",
+        "col_scientific": "Wissenschaftlicher Name",
+        "col_common": "Trivialname",
+        "col_family": "Familie",
+        "col_confidence": "Konfidenz",
+        "unknown": "Unbekannt",
+    },
+}
+
+
+def get_translations(lang: str) -> Dict[str, str]:
+    """Return the localized strings dictionary for `lang`, falling back to English."""
+    norm = (lang or DEFAULT_LANGUAGE).strip().lower().split("-")[0]
+    return REPORT_TRANSLATIONS.get(norm, REPORT_TRANSLATIONS["en"])
+
+
+def get_language_display_name(lang: str) -> str:
+    """Return a human-readable language name from an ISO language code."""
+    norm = (lang or DEFAULT_LANGUAGE).strip().lower().split("-")[0]
+    return LANGUAGE_NAMES.get(norm, norm.upper())
+
+
+def build_system_prompt_sulawesi(lang: str = DEFAULT_LANGUAGE) -> str:
+    """Build the North Sulawesi marine biology system prompt with target output language."""
+    lang_name = get_language_display_name(lang)
+    return f"""You are a world-renowned marine biologist specializing in the Indo-Pacific region, specifically North Sulawesi (Lembeh Strait muck diving and Bunaken National Park coral reefs).
 You have deep expertise in identifying:
 - Nudibranchs, pleurobranchs, flatworms, and opisthobranchs (Chromodorididae, Phyllidiidae, Flabellinidae, Polyceridae, Pleurobranchidae, etc.)
 - Cryptic macro fauna of Lembeh Strait (frogfishes/Antennariidae, pygmy seahorses, ghost pipefishes/Solenostomidae, mimic/wonderpus/blue-ringed octopuses, harlequin/emperor/crinoid shrimps, scorpionfishes/Rhinopias, pipefishes)
 - Coral reef fishes of Bunaken (butterflyfishes, angelfishes, wrasses, damselfishes, triggerfishes, moray eels, gobies, blennies).
 
 Analyze the provided underwater image and return ONLY a valid JSON object strictly matching this schema:
-{
+{{
   "predictions": [
-    {
-      "scientific_name": "Genus species (e.g., Chromodoris annae)",
-      "common_name": "Vernacular common name (e.g., Anna's Chromodoris)",
-      "family": "Taxonomic family (e.g., Chromodorididae)",
+    {{
+      "scientific_name": "Genus species in Latin binomial format (e.g., Chromodoris annae)",
+      "common_name": "Vernacular common name written in {lang_name}",
+      "family": "Taxonomic family in Latin (e.g., Chromodorididae)",
       "confidence": 92.5
-    }
+    }}
   ]
-}
+}}
 Guidelines:
 - Provide between 3 and 5 hypotheses sorted by decreasing confidence (`confidence` between 0 and 100).
+- Write the `common_name` field in {lang_name} (language code: `{lang}`). If no localized vernacular name exists in {lang_name}, provide the English common name.
 - If multiple species are visible, focus on the primary subject of the photograph.
 - Output no text outside the JSON object."""
+
+
+SYSTEM_PROMPT_SULAWESI = build_system_prompt_sulawesi(DEFAULT_LANGUAGE)
 
 
 # ==============================================================================
@@ -352,6 +489,7 @@ class GeminiVisionClassifier(BaseClassifier):
         self,
         model_name: str = DEFAULT_GEMINI_MODEL,
         api_key: Optional[str] = None,
+        locale: str = DEFAULT_LANGUAGE,
     ) -> None:
         self.api_key = (
             api_key
@@ -377,21 +515,24 @@ class GeminiVisionClassifier(BaseClassifier):
         self.types = types
         self.client = genai.Client(api_key=self.api_key)
         self.model_name = model_name
+        self.locale = locale
         self.model_label = f"Google Gemini API (`{model_name}` — North Sulawesi Context)"
 
     def predict(self, img: Image.Image, top_k: int = 5) -> List[SpeciesHypothesis]:
         jpeg_bytes = image_to_jpeg_bytes(img)
+        lang_name = get_language_display_name(self.locale)
         response = self.client.models.generate_content(
             model=self.model_name,
             contents=[
                 self.types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
                 (
-                    "Identify the marine species in this underwater photograph taken in "
-                    f"North Sulawesi (Lembeh/Bunaken). Return the top {top_k} hypotheses in JSON."
+                    "Identify the marine species (fish, nudibranch, pleurobranch, or macro fauna) "
+                    "in this underwater photograph taken in North Sulawesi (Lembeh/Bunaken). "
+                    f"Return the top {top_k} hypotheses in JSON with common_name in {lang_name}."
                 ),
             ],
             config=self.types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT_SULAWESI,
+                system_instruction=build_system_prompt_sulawesi(self.locale),
                 response_mime_type="application/json",
                 temperature=0.1,
             ),
@@ -409,6 +550,7 @@ class OpenAIVisionClassifier(BaseClassifier):
         self,
         model_name: str = DEFAULT_OPENAI_MODEL,
         api_key: Optional[str] = None,
+        locale: str = DEFAULT_LANGUAGE,
     ) -> None:
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not self.api_key:
@@ -427,26 +569,29 @@ class OpenAIVisionClassifier(BaseClassifier):
 
         self.client = OpenAI(api_key=self.api_key)
         self.model_name = model_name
+        self.locale = locale
         self.model_label = f"OpenAI Vision API (`{model_name}` — North Sulawesi Context)"
 
     def predict(self, img: Image.Image, top_k: int = 5) -> List[SpeciesHypothesis]:
         jpeg_bytes = image_to_jpeg_bytes(img)
         b64_img = base64.b64encode(jpeg_bytes).decode("utf-8")
+        lang_name = get_language_display_name(self.locale)
 
         response = self.client.chat.completions.create(
             model=self.model_name,
             response_format={"type": "json_object"},
             temperature=0.1,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT_SULAWESI},
+                {"role": "system", "content": build_system_prompt_sulawesi(self.locale)},
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
                             "text": (
-                                "Identify the marine species in this underwater photograph taken in "
-                                f"North Sulawesi (Lembeh/Bunaken). Return the top {top_k} hypotheses in JSON."
+                                "Identify the marine species (fish, nudibranch, pleurobranch, or macro fauna) "
+                                "in this underwater photograph taken in North Sulawesi (Lembeh/Bunaken). "
+                                f"Return the top {top_k} hypotheses in JSON with common_name in {lang_name}."
                             ),
                         },
                         {
@@ -492,16 +637,20 @@ def build_markdown_header(
     folder_path: Path,
     model_label: str,
     total_images: int,
+    lang: str = DEFAULT_LANGUAGE,
 ) -> str:
-    """Build the standardized header for `DETECTION.md`."""
+    """Build the localized header for `DETECTION.md`."""
+    tr = get_translations(lang)
     now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     folder_display = folder_path.name or str(folder_path)
+    lang_display = f"{get_language_display_name(lang)} (`{lang}`)"
     return (
-        "# 🐠 Underwater Species Identification Report — North Sulawesi (Lembeh & Bunaken)\n\n"
-        f"- **Last analysis date:** {now_str}\n"
-        f"- **Analyzed folder:** `{folder_display}`\n"
-        f"- **Model used:** {model_label}\n"
-        f"- **Total images detected:** {total_images}\n\n"
+        f"# {tr['title']}\n\n"
+        f"- **{tr['date_label']}:** {now_str}\n"
+        f"- **{tr['folder_label']}:** `{folder_display}`\n"
+        f"- **{tr['model_label']}:** {model_label}\n"
+        f"- **{tr['lang_label']}:** {lang_display}\n"
+        f"- **{tr['total_label']}:** {total_images}\n\n"
         "---\n\n"
     )
 
@@ -511,16 +660,17 @@ def update_markdown_header_metadata(
     folder_path: Path,
     model_label: str,
     total_images: int,
+    lang: str = DEFAULT_LANGUAGE,
 ) -> None:
     """
-    Update the header metadata (date, model, total image count) of an existing
+    Update the header metadata (date, model, language, total image count) of an existing
     `DETECTION.md` file while preserving all previously recorded entries.
     """
     if not md_path.exists():
         return
 
     content = md_path.read_text(encoding="utf-8")
-    new_header = build_markdown_header(folder_path, model_label, total_images)
+    new_header = build_markdown_header(folder_path, model_label, total_images, lang=lang)
 
     separator = "\n---\n\n"
     if separator in content:
@@ -530,36 +680,43 @@ def update_markdown_header_metadata(
         md_path.write_text(new_header + content, encoding="utf-8")
 
 
-def format_prediction_entry(result: ImagePredictionResult) -> str:
-    """Format a single image prediction result as a readable Markdown section."""
+def format_prediction_entry(
+    result: ImagePredictionResult,
+    lang: str = DEFAULT_LANGUAGE,
+) -> str:
+    """Format a single image prediction result as a localized Markdown section."""
+    tr = get_translations(lang)
     lines = [f"### 📷 `{result.rel_path}`", ""]
 
     if result.error:
-        lines.append(f"- ⚠️ **Analysis error:** `{result.error}`")
+        lines.append(f"- ⚠️ **{tr['error_label']}:** `{result.error}`")
         lines.append("\n---\n")
         return "\n".join(lines)
 
     if not result.hypotheses:
-        lines.append("- ⚠️ No hypotheses returned by the model.")
+        lines.append(f"- ⚠️ {tr['no_hypotheses']}")
         lines.append("\n---\n")
         return "\n".join(lines)
 
     top1 = result.hypotheses[0]
     lines.append(
-        f"- **Top 1:** **[{top1.scientific_name}]** (*{top1.common_name}*) "
-        f"— **Confidence: {top1.confidence:.1f}%**"
+        f"- **{tr['top1_label']}:** **[{top1.scientific_name}]** (*{top1.common_name}*) "
+        f"— **{tr['confidence_label']}: {top1.confidence:.1f}%**"
     )
-    lines.append(f"- **Taxonomic family:** `{top1.family}`")
+    lines.append(f"- **{tr['family_label']}:** `{top1.family}`")
 
     if len(result.hypotheses) > 1:
         alts = [
             f"*{h.scientific_name}* ({h.common_name}, {h.family} — {h.confidence:.1f}%)"
             for h in result.hypotheses[1:]
         ]
-        lines.append(f"- **Alternatives:** {', '.join(alts)}")
+        lines.append(f"- **{tr['alternatives_label']}:** {', '.join(alts)}")
 
     lines.append("")
-    lines.append("| Rank | Scientific Name | Common Name | Family | Confidence |")
+    lines.append(
+        f"| {tr['col_rank']} | {tr['col_scientific']} | {tr['col_common']} | "
+        f"{tr['col_family']} | {tr['col_confidence']} |"
+    )
     lines.append("| :--- | :--- | :--- | :--- | :--- |")
     for idx, h in enumerate(result.hypotheses, start=1):
         lines.append(
@@ -598,6 +755,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help=(
             "Inference mode: 'local' (PyTorch MPS + iNaturalist 2021, zero cost), "
             "'gemini' (Gemini Flash API with Sulawesi context), or 'openai' (GPT-4o Vision)."
+        ),
+    )
+    parser.add_argument(
+        "--lang",
+        "-l",
+        type=str,
+        default=DEFAULT_LANGUAGE,
+        help=(
+            "Output language code for DETECTION.md headers and species vernacular names "
+            "(e.g., 'en', 'fr', 'id', 'es', 'de')."
         ),
     )
     parser.add_argument(
@@ -704,24 +871,35 @@ def resolve_existing_file_policy(
 
 def create_classifier(args: argparse.Namespace) -> BaseClassifier:
     """Instantiate the selected inference engine."""
+    lang = (args.lang or DEFAULT_LANGUAGE).strip().lower()
     if args.mode == "local":
         model_name = args.model or DEFAULT_LOCAL_MODEL
         return LocalTimmINatClassifier(
             model_name=model_name,
             enrich_taxonomy=not args.offline_taxonomy,
+            locale=lang,
         )
     if args.mode == "gemini":
         model_name = args.model or DEFAULT_GEMINI_MODEL
-        return GeminiVisionClassifier(model_name=model_name, api_key=args.api_key)
+        return GeminiVisionClassifier(
+            model_name=model_name,
+            api_key=args.api_key,
+            locale=lang,
+        )
     if args.mode == "openai":
         model_name = args.model or DEFAULT_OPENAI_MODEL
-        return OpenAIVisionClassifier(model_name=model_name, api_key=args.api_key)
+        return OpenAIVisionClassifier(
+            model_name=model_name,
+            api_key=args.api_key,
+            locale=lang,
+        )
     raise ValueError(f"Unknown mode: {args.mode}")
 
 
 def main() -> None:
     args = parse_args()
     folder: Path = args.folder.expanduser().resolve()
+    lang = (args.lang or DEFAULT_LANGUAGE).strip().lower()
 
     if not folder.exists() or not folder.is_dir():
         logger.error("The specified folder does not exist or is not a directory: %s", folder)
@@ -771,10 +949,16 @@ def main() -> None:
         sys.exit(1)
 
     if should_overwrite or not output_md.exists():
-        header = build_markdown_header(folder, classifier.model_label, total_images)
+        header = build_markdown_header(folder, classifier.model_label, total_images, lang=lang)
         output_md.write_text(header, encoding="utf-8")
     else:
-        update_markdown_header_metadata(output_md, folder, classifier.model_label, total_images)
+        update_markdown_header_metadata(
+            output_md,
+            folder,
+            classifier.model_label,
+            total_images,
+            lang=lang,
+        )
 
     success_count = 0
     error_count = 0
@@ -798,7 +982,7 @@ def main() -> None:
             result = ImagePredictionResult(rel_path=rel_path, error=str(exc))
             error_count += 1
 
-        entry_markdown = format_prediction_entry(result)
+        entry_markdown = format_prediction_entry(result, lang=lang)
         with output_md.open("a", encoding="utf-8") as f:
             f.write(entry_markdown)
 

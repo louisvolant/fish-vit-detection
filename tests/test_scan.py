@@ -148,6 +148,38 @@ class TestScanCore(unittest.TestCase):
             self.assertIn("UpdatedModel", updated_text)
             self.assertIn("`lembeh/wonderpus.jpg`", updated_text)
 
+    def test_multilingual_report_formatting_and_system_prompt(self) -> None:
+        result = scan.ImagePredictionResult(
+            rel_path="lembeh/pleurobranch.jpg",
+            hypotheses=[
+                scan.SpeciesHypothesis(
+                    scientific_name="Pleurobranchus forskalii",
+                    common_name="Pleurobranche de Forskal",
+                    family="Pleurobranchidae",
+                    confidence=95.0,
+                )
+            ],
+        )
+        fr_entry = scan.format_prediction_entry(result, lang="fr")
+        self.assertIn("Famille taxonomique", fr_entry)
+        self.assertIn("Nom vernaculaire", fr_entry)
+        self.assertIn("Confiance: 95.0%", fr_entry)
+
+        id_header = scan.build_markdown_header(
+            Path("/tmp/dive_photos"),
+            "TestModel",
+            10,
+            lang="id",
+        )
+        self.assertIn("Laporan Identifikasi Spesies Bawah Air", id_header)
+        self.assertIn("Bahasa laporan:** Indonesian (`id`)", id_header)
+
+        prompt_fr = scan.build_system_prompt_sulawesi("fr")
+        self.assertIn("French", prompt_fr)
+
+        args = scan.parse_args(["--folder", "/tmp/photos", "--lang", "fr"])
+        self.assertEqual(args.lang, "fr")
+
 
 if __name__ == "__main__":
     unittest.main()

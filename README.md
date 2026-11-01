@@ -19,6 +19,9 @@ Designed for Indo-Pacific marine biodiversity, including **North Sulawesi (Lembe
 - **Crash Recovery & Existing Report Policies (`--existing`)**:
   - Writes entries incrementally to `DETECTION.md`.
   - Automatically resumes interrupted runs without re-analyzing already recorded images, or allows full overwrite (`--overwrite`), interactive confirmation (`--existing ask`), or immediate exit (`--existing skip`).
+- **Multi-Language Output (`--lang` / `-l`)**:
+  - Supports writing `DETECTION.md` headers, table columns, and species vernacular names (for fishes, nudibranchs, pleurobranchs, and macro fauna) in your chosen language (`en`, `fr`, `id`, `es`, `de`, etc.).
+  - Passes the language locale to both the iNaturalist taxonomy resolver and Vision LLM system prompts.
 
 ---
 
@@ -63,20 +66,36 @@ pip install -r requirements.txt
   - `--existing ask`: Prompts interactively in the terminal (`Resume`, `Overwrite`, or `Cancel`).
   - `--existing skip`: Exits immediately if `DETECTION.md` already exists.
 
-### Examples by Mode
+### Examples by Mode & Language
 
 ```bash
-# 1. Local Mode (Apple Silicon MPS + iNaturalist 2021 model)
+# 1. Local Mode (Apple Silicon MPS + iNaturalist 2021 model, default English output)
 python scan.py --folder /path/to/underwater/photos --mode local
 
-# 2. Gemini Flash Vision API Mode (North Sulawesi context)
-export GEMINI_API_KEY="your_api_key"
-python scan.py --folder /path/to/underwater/photos --mode gemini
+# 2. Local Mode with French vernacular names and French report
+python scan.py --folder /path/to/underwater/photos --mode local --lang fr
 
-# 3. OpenAI Vision API Mode (GPT-4o-mini / GPT-4o)
+# 3. Gemini Flash Vision API Mode (North Sulawesi context, French output)
+export GEMINI_API_KEY="your_api_key"
+python scan.py --folder /path/to/underwater/photos --mode gemini --lang fr
+
+# 4. OpenAI Vision API Mode (GPT-4o-mini / GPT-4o, interactive existing policy)
 export OPENAI_API_KEY="your_api_key"
-python scan.py --folder /path/to/underwater/photos --mode openai --existing ask
+python scan.py --folder /path/to/underwater/photos --mode openai --existing ask --lang en
 ```
+
+### CLI Options
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--folder`, `-f` | *(required)* | Target folder containing underwater photos (`.jpg`, `.jpeg`, `.png`). |
+| `--mode`, `-m` | `local` | Inference engine: `local` (PyTorch MPS), `gemini`, or `openai`. |
+| `--lang`, `-l` | `en` | Output language for `DETECTION.md` and species common names (`en`, `fr`, `id`, `es`, `de`, etc.). |
+| `--existing` | `resume` | Policy when `DETECTION.md` exists: `resume`, `overwrite`, `ask`, or `skip`. |
+| `--overwrite` | `False` | Shorthand for `--existing overwrite`. |
+| `--top-k` | `5` | Number of species hypotheses returned per image. |
+| `--max-size` | `1024` | Max dimension (px) for in-memory image resizing before inference. |
+| `--offline-taxonomy` | `False` | Disable public iNaturalist API queries in `local` mode. |
 
 The report is generated at `/path/to/underwater/photos/DETECTION.md`.
 
