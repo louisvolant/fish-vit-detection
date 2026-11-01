@@ -29,7 +29,9 @@ The repository is named **`fish-vit-detection`** because its local inference eng
 - **Dual Inference Engines (`--mode`)**:
   1. **`--mode local` (Default, Zero Cost)**: Runs a Vision Transformer (`timm/eva02_large_patch14_clip_336.merged2b_ft_inat21`) fine-tuned on **iNaturalist 2021** (10,000 species) locally via PyTorch `mps` on Apple Silicon, enriched with the public iNaturalist API.
   2. **`--mode gemini` / `--mode openai` (Geo-Contextual Vision API)**: Uses `gemini-2.5-flash` or `gpt-4o-mini` with a specialized system prompt tailored to North Sulawesi marine fauna (Lembeh Strait muck diving & Bunaken coral reefs).
-- **Taxonomic Enrichment**: Automatically retrieves exact taxonomic families and vernacular names along with top-K confidence scores.
+- **Taxonomic Enrichment & Noise Filtering (`--min-confidence`)**:
+  - Automatically retrieves exact taxonomic families and vernacular names along with top-K confidence scores.
+  - Filters out any low-probability hypothesis below **5.0% confidence** by default (`--min-confidence 5.0`) so reports remain clean and free of irrelevant tail predictions.
 - **Recursive & Safe Batch Processing**:
   - Recursively scans subfolders for `.jpg`, `.jpeg`, and `.png` images.
   - Automatically skips macOS resource forks (`._*`, `.DS_Store`), hidden directories, and corrupted images.
@@ -112,7 +114,8 @@ python scan.py --folder /path/to/underwater/photos --mode openai --existing ask 
 | `--lang`, `-l` | `en` | Output language for `DETECTION.md` and species common names (`en`, `fr`, `id`, `es`, `de`, etc.). |
 | `--existing` | `resume` | Policy when `DETECTION.md` exists: `resume`, `overwrite`, `ask`, or `skip`. |
 | `--overwrite` | `False` | Shorthand for `--existing overwrite`. |
-| `--top-k` | `5` | Number of species hypotheses returned per image. |
+| `--top-k` | `5` | Maximum number of species hypotheses evaluated per image. |
+| `--min-confidence` | `5.0` | Minimum confidence percentage (`0-100`) required to display a hypothesis. |
 | `--max-size` | `1024` | Max dimension (px) for in-memory image resizing before inference. |
 | `--offline-taxonomy` | `False` | Disable public iNaturalist API queries in `local` mode. |
 

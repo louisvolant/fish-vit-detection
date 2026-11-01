@@ -45,6 +45,7 @@ LOCAL_MODEL_PRESETS: Dict[str, str] = {
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_LANGUAGE = "en"
+DEFAULT_MIN_CONFIDENCE = 5.0
 
 LANGUAGE_NAMES: Dict[str, str] = {
     "en": "English",
@@ -68,7 +69,7 @@ REPORT_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "lang_label": "Report language",
         "total_label": "Total images detected",
         "error_label": "Analysis error",
-        "no_hypotheses": "No hypotheses returned by the model.",
+        "no_hypotheses": "No species reached the minimum confidence threshold.",
         "top1_label": "Top 1",
         "confidence_label": "Confidence",
         "family_label": "Taxonomic family",
@@ -88,7 +89,7 @@ REPORT_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "lang_label": "Langue du rapport",
         "total_label": "Nombre total d'images détectées",
         "error_label": "Erreur d'analyse",
-        "no_hypotheses": "Aucune hypothèse retournée par le modèle.",
+        "no_hypotheses": "Aucune espèce n'a atteint le seuil minimal de confiance.",
         "top1_label": "Top 1",
         "confidence_label": "Confiance",
         "family_label": "Famille taxonomique",
@@ -108,7 +109,7 @@ REPORT_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "lang_label": "Bahasa laporan",
         "total_label": "Total gambar terdeteksi",
         "error_label": "Kesalahan analisis",
-        "no_hypotheses": "Tidak ada hipotesis yang dikembalikan oleh model.",
+        "no_hypotheses": "Tidak ada spesies yang mencapai ambang batas keyakinan minimum.",
         "top1_label": "Top 1",
         "confidence_label": "Keyakinan",
         "family_label": "Famili taksonomi",
@@ -128,7 +129,7 @@ REPORT_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "lang_label": "Idioma del informe",
         "total_label": "Total de imágenes detectadas",
         "error_label": "Error de análisis",
-        "no_hypotheses": "El modelo no devolvió ninguna hipótesis.",
+        "no_hypotheses": "Ninguna especie alcanzó el umbral mínimo de confianza.",
         "top1_label": "Top 1",
         "confidence_label": "Confianza",
         "family_label": "Familia taxonómica",
@@ -148,7 +149,7 @@ REPORT_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "lang_label": "Berichtssprache",
         "total_label": "Gesamtzahl erkannter Bilder",
         "error_label": "Analysefehler",
-        "no_hypotheses": "Keine Hypothesen vom Modell zurückgegeben.",
+        "no_hypotheses": "Keine Art hat den Mindestkonfidenzschwellenwert erreicht.",
         "top1_label": "Top 1",
         "confidence_label": "Konfidenz",
         "family_label": "Taxonomische Familie",
@@ -392,7 +393,12 @@ class INaturalistTaxonomyResolver:
 class BaseClassifier:
     model_label: str = "Unknown"
 
-    def predict(self, img: Image.Image, top_k: int = 5) -> List[SpeciesHypothesis]:
+    def predict(
+        self,
+        img: Image.Image,
+        top_k: int = 5,
+        min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+    ) -> List[SpeciesHypothesis]:
         raise NotImplementedError
 
 
@@ -480,7 +486,12 @@ class LocalTimmINatClassifier(BaseClassifier):
             logger.debug("Could not load config.json labels from Hugging Face Hub: %s", exc)
             return [], {}
 
-    def predict(self, img: Image.Image, top_k: int = 5) -> List[SpeciesHypothesis]:
+    def predict(
+        self,
+        img: Image.Image,
+        top_k: int = 5,
+        min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+    ) -> List[SpeciesHypothesis]:
         tensor = self.transforms(img).unsqueeze(0).to(self.device)
 
         with self.torch.inference_mode():
@@ -490,6 +501,10 @@ class LocalTimmINatClassifier(BaseClassifier):
 
         hypotheses: List[SpeciesHypothesis] = []
         for idx, prob in zip(top_indices.cpu().tolist(), top_probs.cpu().tolist()):
+            confidence = round(float(prob) * 100.0, 1)
+            if confidence < min_confidence:
+                continue
+
             sci_name = (
                 self.label_names[idx]
                 if idx < len(self.label_names)
@@ -503,15 +518,27 @@ class LocalTimmINatClassifier(BaseClassifier):
                     scientific_name=sci_name,
                     common_name=common_name,
                     family=family,
-                    confidence=round(float(prob) * 100.0, 1),
+                    confidence=confidence,
                 )
             )
 
         return hypotheses
 
 
-def _parse_json_predictions(raw_text: str, top_k: int = 5) -> List[SpeciesHypothesis]:
-    """Extract and validate a list of `SpeciesHypothesis` from an LLM JSON response."""
+def filter_hypotheses_by_confidence(
+    hypotheses: List[SpeciesHypothesis],
+    min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+) -> List[SpeciesHypothesis]:
+    """Filter out any species hypothesis whose confidence is strictly below `min_confidence`."""
+    return [h for h in hypotheses if h.confidence >= min_confidence]
+
+
+def _parse_json_predictions(
+    raw_text: str,
+    top_k: int = 5,
+    min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+) -> List[SpeciesHypothesis]:
+    """Extract, validate, and filter `SpeciesHypothesis` items from an LLM JSON response."""
     cleaned = raw_text.strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
@@ -521,12 +548,15 @@ def _parse_json_predictions(raw_text: str, top_k: int = 5) -> List[SpeciesHypoth
     hypotheses: List[SpeciesHypothesis] = []
 
     for item in preds[:top_k]:
+        confidence = round(float(item.get("confidence", 0.0)), 1)
+        if confidence < min_confidence:
+            continue
         hypotheses.append(
             SpeciesHypothesis(
                 scientific_name=str(item.get("scientific_name", "Unknown")).strip(),
                 common_name=str(item.get("common_name", "Unknown")).strip(),
                 family=str(item.get("family", "Unknown")).strip(),
-                confidence=round(float(item.get("confidence", 0.0)), 1),
+                confidence=confidence,
             )
         )
     return hypotheses
@@ -571,7 +601,12 @@ class GeminiVisionClassifier(BaseClassifier):
         self.locale = locale
         self.model_label = f"Google Gemini API (`{model_name}` — North Sulawesi Context)"
 
-    def predict(self, img: Image.Image, top_k: int = 5) -> List[SpeciesHypothesis]:
+    def predict(
+        self,
+        img: Image.Image,
+        top_k: int = 5,
+        min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+    ) -> List[SpeciesHypothesis]:
         jpeg_bytes = image_to_jpeg_bytes(img)
         lang_name = get_language_display_name(self.locale)
         response = self.client.models.generate_content(
@@ -581,7 +616,8 @@ class GeminiVisionClassifier(BaseClassifier):
                 (
                     "Identify the marine species (fish, nudibranch, pleurobranch, or macro fauna) "
                     "in this underwater photograph taken in North Sulawesi (Lembeh/Bunaken). "
-                    f"Return the top {top_k} hypotheses in JSON with common_name in {lang_name}."
+                    f"Return up to {top_k} hypotheses with confidence >= {min_confidence:.1f}% "
+                    f"in JSON with common_name in {lang_name}."
                 ),
             ],
             config=self.types.GenerateContentConfig(
@@ -590,7 +626,11 @@ class GeminiVisionClassifier(BaseClassifier):
                 temperature=0.1,
             ),
         )
-        return _parse_json_predictions(response.text, top_k=top_k)
+        return _parse_json_predictions(
+            response.text,
+            top_k=top_k,
+            min_confidence=min_confidence,
+        )
 
 
 class OpenAIVisionClassifier(BaseClassifier):
@@ -625,7 +665,12 @@ class OpenAIVisionClassifier(BaseClassifier):
         self.locale = locale
         self.model_label = f"OpenAI Vision API (`{model_name}` — North Sulawesi Context)"
 
-    def predict(self, img: Image.Image, top_k: int = 5) -> List[SpeciesHypothesis]:
+    def predict(
+        self,
+        img: Image.Image,
+        top_k: int = 5,
+        min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+    ) -> List[SpeciesHypothesis]:
         jpeg_bytes = image_to_jpeg_bytes(img)
         b64_img = base64.b64encode(jpeg_bytes).decode("utf-8")
         lang_name = get_language_display_name(self.locale)
@@ -644,7 +689,8 @@ class OpenAIVisionClassifier(BaseClassifier):
                             "text": (
                                 "Identify the marine species (fish, nudibranch, pleurobranch, or macro fauna) "
                                 "in this underwater photograph taken in North Sulawesi (Lembeh/Bunaken). "
-                                f"Return the top {top_k} hypotheses in JSON with common_name in {lang_name}."
+                                f"Return up to {top_k} hypotheses with confidence >= {min_confidence:.1f}% "
+                                f"in JSON with common_name in {lang_name}."
                             ),
                         },
                         {
@@ -659,7 +705,11 @@ class OpenAIVisionClassifier(BaseClassifier):
             ],
         )
         content = response.choices[0].message.content or "{}"
-        return _parse_json_predictions(content, top_k=top_k)
+        return _parse_json_predictions(
+            content,
+            top_k=top_k,
+            min_confidence=min_confidence,
+        )
 
 
 # ==============================================================================
@@ -736,8 +786,12 @@ def update_markdown_header_metadata(
 def format_prediction_entry(
     result: ImagePredictionResult,
     lang: str = DEFAULT_LANGUAGE,
+    min_confidence: float = DEFAULT_MIN_CONFIDENCE,
 ) -> str:
-    """Format a single image prediction result as a localized Markdown section."""
+    """
+    Format a single image prediction result as a localized Markdown section.
+    Hypotheses strictly below `min_confidence` (default 5.0%) are excluded.
+    """
     tr = get_translations(lang)
     lines = [f"### 📷 `{result.rel_path}`", ""]
 
@@ -746,22 +800,27 @@ def format_prediction_entry(
         lines.append("\n---\n")
         return "\n".join(lines)
 
-    if not result.hypotheses:
-        lines.append(f"- ⚠️ {tr['no_hypotheses']}")
+    valid_hypotheses = filter_hypotheses_by_confidence(
+        result.hypotheses,
+        min_confidence=min_confidence,
+    )
+
+    if not valid_hypotheses:
+        lines.append(f"- ⚠️ {tr['no_hypotheses']} (< {min_confidence:.1f}%)")
         lines.append("\n---\n")
         return "\n".join(lines)
 
-    top1 = result.hypotheses[0]
+    top1 = valid_hypotheses[0]
     lines.append(
         f"- **{tr['top1_label']}:** **[{top1.scientific_name}]** (*{top1.common_name}*) "
         f"— **{tr['confidence_label']}: {top1.confidence:.1f}%**"
     )
     lines.append(f"- **{tr['family_label']}:** `{top1.family}`")
 
-    if len(result.hypotheses) > 1:
+    if len(valid_hypotheses) > 1:
         alts = [
             f"*{h.scientific_name}* ({h.common_name}, {h.family} — {h.confidence:.1f}%)"
-            for h in result.hypotheses[1:]
+            for h in valid_hypotheses[1:]
         ]
         lines.append(f"- **{tr['alternatives_label']}:** {', '.join(alts)}")
 
@@ -771,7 +830,7 @@ def format_prediction_entry(
         f"{tr['col_family']} | {tr['col_confidence']} |"
     )
     lines.append("| :--- | :--- | :--- | :--- | :--- |")
-    for idx, h in enumerate(result.hypotheses, start=1):
+    for idx, h in enumerate(valid_hypotheses, start=1):
         lines.append(
             f"| #{idx} | **{h.scientific_name}** | {h.common_name} | `{h.family}` | {h.confidence:.1f}% |"
         )
@@ -857,7 +916,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--top-k",
         type=int,
         default=5,
-        help="Number of hypotheses to return per image (3 to 5 recommended).",
+        help="Maximum number of hypotheses to evaluate per image (3 to 5 recommended).",
+    )
+    parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=DEFAULT_MIN_CONFIDENCE,
+        help="Minimum confidence percentage (0-100) required to display a hypothesis.",
     )
     parser.add_argument(
         "--max-size",
@@ -1039,7 +1104,11 @@ def main() -> None:
             continue
 
         try:
-            hypotheses = classifier.predict(img, top_k=args.top_k)
+            hypotheses = classifier.predict(
+                img,
+                top_k=args.top_k,
+                min_confidence=args.min_confidence,
+            )
             result = ImagePredictionResult(rel_path=rel_path, hypotheses=hypotheses)
             success_count += 1
         except Exception as exc:
@@ -1047,7 +1116,11 @@ def main() -> None:
             result = ImagePredictionResult(rel_path=rel_path, error=str(exc))
             error_count += 1
 
-        entry_markdown = format_prediction_entry(result, lang=lang)
+        entry_markdown = format_prediction_entry(
+            result,
+            lang=lang,
+            min_confidence=args.min_confidence,
+        )
         with output_md.open("a", encoding="utf-8") as f:
             f.write(entry_markdown)
 

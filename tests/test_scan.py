@@ -65,7 +65,7 @@ class TestScanCore(unittest.TestCase):
         )
         self.assertEqual(chosen["id"], 132688)
 
-    def test_format_prediction_entry(self) -> None:
+    def test_format_prediction_entry_filters_below_5_percent(self) -> None:
         result = scan.ImagePredictionResult(
             rel_path="bunaken/clownfish.jpg",
             hypotheses=[
@@ -73,13 +73,19 @@ class TestScanCore(unittest.TestCase):
                     scientific_name="Amphiprion ocellaris",
                     common_name="Ocellaris Clownfish",
                     family="Pomacentridae",
-                    confidence=96.4,
+                    confidence=91.4,
                 ),
                 scan.SpeciesHypothesis(
                     scientific_name="Amphiprion percula",
                     common_name="Orange Clownfish",
                     family="Pomacentridae",
-                    confidence=3.1,
+                    confidence=6.2,
+                ),
+                scan.SpeciesHypothesis(
+                    scientific_name="Premnas biaculeatus",
+                    common_name="Spinecheek Anemonefish",
+                    family="Pomacentridae",
+                    confidence=2.4,
                 ),
             ],
         )
@@ -88,6 +94,22 @@ class TestScanCore(unittest.TestCase):
         self.assertIn("**[Amphiprion ocellaris]** (*Ocellaris Clownfish*)", md)
         self.assertIn("`Pomacentridae`", md)
         self.assertIn("*Amphiprion percula*", md)
+        self.assertNotIn("Premnas biaculeatus", md)
+
+        low_conf_result = scan.ImagePredictionResult(
+            rel_path="lembeh/blurry_sand.jpg",
+            hypotheses=[
+                scan.SpeciesHypothesis(
+                    scientific_name="Inimicus didactylus",
+                    common_name="Spiny Devilfish",
+                    family="Synanceiidae",
+                    confidence=3.8,
+                )
+            ],
+        )
+        low_md = scan.format_prediction_entry(low_conf_result, lang="fr")
+        self.assertIn("Aucune espèce n'a atteint le seuil minimal de confiance.", low_md)
+        self.assertNotIn("Inimicus didactylus", low_md)
 
     def test_parse_json_predictions_handles_markdown_fences(self) -> None:
         raw = """```json
