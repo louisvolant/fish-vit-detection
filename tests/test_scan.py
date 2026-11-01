@@ -180,6 +180,16 @@ class TestScanCore(unittest.TestCase):
         args = scan.parse_args(["--folder", "/tmp/photos", "--lang", "fr"])
         self.assertEqual(args.lang, "fr")
 
+    def test_resolve_local_model_presets_vit_and_cnn(self) -> None:
+        self.assertEqual(scan.resolve_local_model_name(None), scan.DEFAULT_LOCAL_MODEL)
+        self.assertEqual(scan.resolve_local_model_name("vit"), scan.DEFAULT_LOCAL_MODEL)
+        self.assertEqual(scan.resolve_local_model_name("cnn"), scan.DEFAULT_CNN_MODEL)
+        self.assertEqual(scan.resolve_local_model_name("convnext"), scan.DEFAULT_CNN_MODEL)
+        self.assertEqual(
+            scan.resolve_local_model_name("hf-hub:timm/custom_model"),
+            "hf-hub:timm/custom_model",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

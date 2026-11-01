@@ -6,6 +6,22 @@ Designed for Indo-Pacific marine biodiversity, including **North Sulawesi (Lembe
 
 ---
 
+## Why `fish-vit-detection`? How It Works (ViT vs. CNN)
+
+The repository is named **`fish-vit-detection`** because its local inference engine identifies marine species (fishes, nudibranchs, pleurobranchs, crustaceans, and cephalopods) using **Vision Transformers (ViT)** as well as modern **Convolutional Neural Networks (CNN)** fine-tuned on the **iNaturalist 2021** dataset (10,000 biological species):
+
+1. **Vision Transformer (`--model vit`, default)**:
+   - Uses [`timm/eva02_large_patch14_clip_336.merged2b_ft_inat21`](https://huggingface.co/timm/eva02_large_patch14_clip_336.merged2b_ft_inat21).
+   - Splits each underwater photograph into fixed-size $14 \times 14$ pixel patches, embeds them as tokens, and applies **self-attention** across the entire image.
+   - **Why it excels underwater**: Self-attention links distant visual cues simultaneously—such as a nudibranch's rhinophores and gills, or a reef fish's caudal fin pattern and eye bar—even in cluttered coral or muck-diving backgrounds.
+2. **Convolutional Neural Network (`--model cnn`)**:
+   - Uses [`timm/convnext_large_mlp.laion2b_ft_augreg_inat21`](https://huggingface.co/timm/convnext_large_mlp.laion2b_ft_augreg_inat21) (ConvNeXt-Large).
+   - Applies hierarchical sliding convolutional filters to capture fine-grained local textures, scale patterns, mantle tubercles, and color gradients.
+3. **Hardware Acceleration on Apple Silicon (`mps`)**:
+   - Both ViT and CNN backbones execute directly on the Apple Silicon GPU via PyTorch's Metal Performance Shaders (`mps`) backend, with smart in-memory image resizing to keep unified memory usage low.
+
+---
+
 ## Features
 
 - **Dual Inference Engines (`--mode`)**:
@@ -69,11 +85,11 @@ pip install -r requirements.txt
 ### Examples by Mode & Language
 
 ```bash
-# 1. Local Mode (Apple Silicon MPS + iNaturalist 2021 model, default English output)
-python scan.py --folder /path/to/underwater/photos --mode local
+# 1. Local Mode with Vision Transformer (ViT, default) on Apple Silicon MPS
+python scan.py --folder /path/to/underwater/photos --mode local --model vit
 
-# 2. Local Mode with French vernacular names and French report
-python scan.py --folder /path/to/underwater/photos --mode local --lang fr
+# 2. Local Mode with Convolutional Neural Network (ConvNeXt CNN) and French report
+python scan.py --folder /path/to/underwater/photos --mode local --model cnn --lang fr
 
 # 3. Gemini Flash Vision API Mode (North Sulawesi context, French output)
 export GEMINI_API_KEY="your_api_key"
@@ -90,6 +106,7 @@ python scan.py --folder /path/to/underwater/photos --mode openai --existing ask 
 | :--- | :--- | :--- |
 | `--folder`, `-f` | *(required)* | Target folder containing underwater photos (`.jpg`, `.jpeg`, `.png`). |
 | `--mode`, `-m` | `local` | Inference engine: `local` (PyTorch MPS), `gemini`, or `openai`. |
+| `--model` | `vit` / auto | Architecture preset (`vit`, `cnn`) in `local` mode, or custom model ID. |
 | `--lang`, `-l` | `en` | Output language for `DETECTION.md` and species common names (`en`, `fr`, `id`, `es`, `de`, etc.). |
 | `--existing` | `resume` | Policy when `DETECTION.md` exists: `resume`, `overwrite`, `ask`, or `skip`. |
 | `--overwrite` | `False` | Shorthand for `--existing overwrite`. |

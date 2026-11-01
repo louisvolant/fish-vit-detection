@@ -35,6 +35,13 @@ logger = logging.getLogger("underwater-scan")
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 DEFAULT_LOCAL_MODEL = "hf-hub:timm/eva02_large_patch14_clip_336.merged2b_ft_inat21"
+DEFAULT_CNN_MODEL = "hf-hub:timm/convnext_large_mlp.laion2b_ft_augreg_inat21"
+LOCAL_MODEL_PRESETS: Dict[str, str] = {
+    "vit": DEFAULT_LOCAL_MODEL,
+    "eva02": DEFAULT_LOCAL_MODEL,
+    "cnn": DEFAULT_CNN_MODEL,
+    "convnext": DEFAULT_CNN_MODEL,
+}
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_LANGUAGE = "en"
@@ -788,7 +795,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--model",
         type=str,
         default=None,
-        help="Override the model identifier (e.g., 'gemini-2.5-pro' or another timm checkpoint).",
+        help=(
+            "Override the model identifier or local architecture preset "
+            "('vit' for EVA-02 Vision Transformer, 'cnn' for ConvNeXt CNN, "
+            "'gemini-2.5-pro', or any timm checkpoint)."
+        ),
     )
     parser.add_argument(
         "--api-key",
@@ -869,11 +880,19 @@ def resolve_existing_file_policy(
     return False, existing_entries
 
 
+def resolve_local_model_name(model_arg: Optional[str]) -> str:
+    """Resolve a local model alias ('vit', 'cnn') or custom timm checkpoint name."""
+    if not model_arg:
+        return DEFAULT_LOCAL_MODEL
+    key = model_arg.strip().lower()
+    return LOCAL_MODEL_PRESETS.get(key, model_arg.strip())
+
+
 def create_classifier(args: argparse.Namespace) -> BaseClassifier:
     """Instantiate the selected inference engine."""
     lang = (args.lang or DEFAULT_LANGUAGE).strip().lower()
     if args.mode == "local":
-        model_name = args.model or DEFAULT_LOCAL_MODEL
+        model_name = resolve_local_model_name(args.model)
         return LocalTimmINatClassifier(
             model_name=model_name,
             enrich_taxonomy=not args.offline_taxonomy,
