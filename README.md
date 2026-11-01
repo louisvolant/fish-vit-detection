@@ -16,6 +16,9 @@ Designed for Indo-Pacific marine biodiversity, including **North Sulawesi (Lembe
   - Recursively scans subfolders for `.jpg`, `.jpeg`, and `.png` images.
   - Automatically skips macOS resource forks (`._*`, `.DS_Store`), hidden directories, and corrupted images.
   - Resizes images proportionally in memory before inference to protect unified RAM.
+- **Crash Recovery & Existing Report Policies (`--existing`)**:
+  - Writes entries incrementally to `DETECTION.md`.
+  - Automatically resumes interrupted runs without re-analyzing already recorded images, or allows full overwrite (`--overwrite`), interactive confirmation (`--existing ask`), or immediate exit (`--existing skip`).
 
 ---
 
@@ -42,6 +45,26 @@ pip install -r requirements.txt
 
 ## Usage
 
+`DETECTION.md` is written directly at the root of the directory passed to `--folder`.
+
+### Handling an Existing `DETECTION.md`
+
+- **Option 1 — Resume (`--existing resume`, enabled by default)**:
+  Reads `DETECTION.md`, skips images already listed, and appends only newly discovered images.
+  ```bash
+  python scan.py --folder /path/to/underwater/photos
+  ```
+- **Option 2 — Overwrite (`--overwrite` or `--existing overwrite`)**:
+  Re-creates `DETECTION.md` from scratch and re-analyzes every image.
+  ```bash
+  python scan.py --folder /path/to/underwater/photos --overwrite
+  ```
+- **Additional Options (`ask` / `skip`)**:
+  - `--existing ask`: Prompts interactively in the terminal (`Resume`, `Overwrite`, or `Cancel`).
+  - `--existing skip`: Exits immediately if `DETECTION.md` already exists.
+
+### Examples by Mode
+
 ```bash
 # 1. Local Mode (Apple Silicon MPS + iNaturalist 2021 model)
 python scan.py --folder /path/to/underwater/photos --mode local
@@ -52,7 +75,7 @@ python scan.py --folder /path/to/underwater/photos --mode gemini
 
 # 3. OpenAI Vision API Mode (GPT-4o-mini / GPT-4o)
 export OPENAI_API_KEY="your_api_key"
-python scan.py --folder /path/to/underwater/photos --mode openai
+python scan.py --folder /path/to/underwater/photos --mode openai --existing ask
 ```
 
 The report is generated at `/path/to/underwater/photos/DETECTION.md`.

@@ -22,7 +22,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -465,8 +465,27 @@ class OpenAIVisionClassifier(BaseClassifier):
 
 
 # ==============================================================================
-# Markdown Report Formatting
+# Markdown Report Management (Creation, Crash Recovery Parsing & Updates)
 # ==============================================================================
+
+ENTRY_HEADER_REGEX = re.compile(r"^###\s+📷\s+`([^`]+)`\s*$", re.MULTILINE)
+
+
+def parse_existing_detection_md(md_path: Path) -> Set[str]:
+    """
+    Read an existing `DETECTION.md` file and extract the set of relative image
+    paths that have already been processed.
+    """
+    if not md_path.exists():
+        return set()
+
+    try:
+        content = md_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Unable to read %s: %s", md_path, exc)
+        return set()
+
+    return set(ENTRY_HEADER_REGEX.findall(content))
 
 
 def build_markdown_header(
@@ -485,6 +504,30 @@ def build_markdown_header(
         f"- **Total images detected:** {total_images}\n\n"
         "---\n\n"
     )
+
+
+def update_markdown_header_metadata(
+    md_path: Path,
+    folder_path: Path,
+    model_label: str,
+    total_images: int,
+) -> None:
+    """
+    Update the header metadata (date, model, total image count) of an existing
+    `DETECTION.md` file while preserving all previously recorded entries.
+    """
+    if not md_path.exists():
+        return
+
+    content = md_path.read_text(encoding="utf-8")
+    new_header = build_markdown_header(folder_path, model_label, total_images)
+
+    separator = "\n---\n\n"
+    if separator in content:
+        _, body = content.split(separator, 1)
+        md_path.write_text(new_header + body, encoding="utf-8")
+    else:
+        md_path.write_text(new_header + content, encoding="utf-8")
 
 
 def format_prediction_entry(result: ImagePredictionResult) -> str:
@@ -558,6 +601,23 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--existing",
+        choices=["resume", "overwrite", "ask", "skip"],
+        default="resume",
+        help=(
+            "Behavior when DETECTION.md already exists in the target folder: "
+            "'resume' (skip already processed photos and append new ones), "
+            "'overwrite' (re-analyze everything from scratch), "
+            "'ask' (prompt interactively in the terminal), "
+            "'skip' (exit immediately without modifying anything)."
+        ),
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Shorthand for `--existing overwrite`: overwrite DETECTION.md if it exists.",
+    )
+    parser.add_argument(
         "--model",
         type=str,
         default=None,
@@ -587,6 +647,59 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Disable iNaturalist API requests for taxonomic family enrichment in local mode.",
     )
     return parser.parse_args(argv)
+
+
+def resolve_existing_file_policy(
+    output_md: Path,
+    policy: str,
+    force_overwrite: bool,
+) -> Tuple[bool, Set[str]]:
+    """
+    Determine how to handle an existing `DETECTION.md` file.
+    Returns `(should_overwrite, already_processed_rel_paths)`.
+    """
+    if force_overwrite:
+        policy = "overwrite"
+
+    if not output_md.exists():
+        return True, set()
+
+    existing_entries = parse_existing_detection_md(output_md)
+
+    if policy == "ask":
+        print(
+            f"\n⚠️  File '{output_md}' already exists "
+            f"({len(existing_entries)} photo(s) already recorded)."
+        )
+        print("  [1] Resume (analyze only new photos)")
+        print("  [2] Overwrite (re-analyze everything from scratch)")
+        print("  [3] Cancel and exit")
+        choice = input("Your choice [1/2/3, default=1]: ").strip() or "1"
+        if choice == "2":
+            policy = "overwrite"
+        elif choice == "3":
+            policy = "skip"
+        else:
+            policy = "resume"
+
+    if policy == "skip":
+        logger.info(
+            "File %s already exists (%d entries). Exiting as requested (--existing skip).",
+            output_md,
+            len(existing_entries),
+        )
+        sys.exit(0)
+
+    if policy == "overwrite":
+        logger.info("Overwriting existing file %s (--overwrite).", output_md)
+        return True, set()
+
+    logger.info(
+        "Resume enabled: %d photo(s) already present in %s will be skipped.",
+        len(existing_entries),
+        output_md.name,
+    )
+    return False, existing_entries
 
 
 def create_classifier(args: argparse.Namespace) -> BaseClassifier:
@@ -625,21 +738,49 @@ def main() -> None:
 
     logger.info("%d image(s) found in %s", total_images, folder)
 
+    should_overwrite, processed_rel_paths = resolve_existing_file_policy(
+        output_md=output_md,
+        policy=args.existing,
+        force_overwrite=args.overwrite,
+    )
+
+    pending_images: List[Tuple[Path, str]] = []
+    for img_path in all_images:
+        rel_path = img_path.relative_to(folder).as_posix()
+        if rel_path not in processed_rel_paths:
+            pending_images.append((img_path, rel_path))
+
+    if not pending_images:
+        logger.info(
+            "All %d images in the folder are already recorded in %s. Nothing to do!",
+            total_images,
+            output_md,
+        )
+        return
+
+    logger.info(
+        "%d image(s) to analyze (%d already processed).",
+        len(pending_images),
+        len(processed_rel_paths),
+    )
+
     try:
         classifier = create_classifier(args)
     except Exception as exc:
         logger.error("Failed to initialize classifier: %s", exc)
         sys.exit(1)
 
-    header = build_markdown_header(folder, classifier.model_label, total_images)
-    output_md.write_text(header, encoding="utf-8")
+    if should_overwrite or not output_md.exists():
+        header = build_markdown_header(folder, classifier.model_label, total_images)
+        output_md.write_text(header, encoding="utf-8")
+    else:
+        update_markdown_header_metadata(output_md, folder, classifier.model_label, total_images)
 
     success_count = 0
     error_count = 0
 
-    for idx, img_path in enumerate(all_images, start=1):
-        rel_path = img_path.relative_to(folder).as_posix()
-        logger.info("[%d/%d] Analyzing %s...", idx, total_images, rel_path)
+    for idx, (img_path, rel_path) in enumerate(pending_images, start=1):
+        logger.info("[%d/%d] Analyzing %s...", idx, len(pending_images), rel_path)
 
         try:
             img = load_and_resize_image(img_path, max_size=args.max_size)

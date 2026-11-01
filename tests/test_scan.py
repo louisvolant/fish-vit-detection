@@ -108,6 +108,46 @@ class TestScanCore(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             scan.OpenAIVisionClassifier(api_key=None)
 
+    def test_parse_existing_detection_md_and_resume_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = Path(tmpdir)
+            md_path = folder / "DETECTION.md"
+            header = scan.build_markdown_header(folder, "TestModel", 2)
+            entry = scan.format_prediction_entry(
+                scan.ImagePredictionResult(
+                    rel_path="lembeh/wonderpus.jpg",
+                    hypotheses=[
+                        scan.SpeciesHypothesis(
+                            scientific_name="Wunderpus photogenicus",
+                            common_name="Wonderpus Octopus",
+                            family="Octopodidae",
+                            confidence=98.0,
+                        )
+                    ],
+                )
+            )
+            md_path.write_text(header + entry, encoding="utf-8")
+
+            processed = scan.parse_existing_detection_md(md_path)
+            self.assertEqual(processed, {"lembeh/wonderpus.jpg"})
+
+            should_overwrite, existing = scan.resolve_existing_file_policy(
+                md_path, policy="resume", force_overwrite=False
+            )
+            self.assertFalse(should_overwrite)
+            self.assertEqual(existing, {"lembeh/wonderpus.jpg"})
+
+            should_overwrite_2, existing_2 = scan.resolve_existing_file_policy(
+                md_path, policy="resume", force_overwrite=True
+            )
+            self.assertTrue(should_overwrite_2)
+            self.assertEqual(existing_2, set())
+
+            scan.update_markdown_header_metadata(md_path, folder, "UpdatedModel", 5)
+            updated_text = md_path.read_text(encoding="utf-8")
+            self.assertIn("UpdatedModel", updated_text)
+            self.assertIn("`lembeh/wonderpus.jpg`", updated_text)
+
 
 if __name__ == "__main__":
     unittest.main()
