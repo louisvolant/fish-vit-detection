@@ -8,8 +8,10 @@ Designed for Indo-Pacific marine biodiversity, including **North Sulawesi (Lembe
 
 ## Features
 
-- **Apple Silicon Hardware Acceleration (`mps`)**: Runs a Vision Transformer (`timm/eva02_large_patch14_clip_336.merged2b_ft_inat21`) fine-tuned on **iNaturalist 2021** (10,000 species) locally via PyTorch MPS at zero cost.
-- **Taxonomic Enrichment**: Automatically queries the free public iNaturalist API (no key required, with in-memory caching) to retrieve exact taxonomic families and vernacular names.
+- **Dual Inference Engines (`--mode`)**:
+  1. **`--mode local` (Default, Zero Cost)**: Runs a Vision Transformer (`timm/eva02_large_patch14_clip_336.merged2b_ft_inat21`) fine-tuned on **iNaturalist 2021** (10,000 species) locally via PyTorch `mps` on Apple Silicon, enriched with the public iNaturalist API.
+  2. **`--mode gemini` / `--mode openai` (Geo-Contextual Vision API)**: Uses `gemini-2.5-flash` or `gpt-4o-mini` with a specialized system prompt tailored to North Sulawesi marine fauna (Lembeh Strait muck diving & Bunaken coral reefs).
+- **Taxonomic Enrichment**: Automatically retrieves exact taxonomic families and vernacular names along with top-K confidence scores.
 - **Recursive & Safe Batch Processing**:
   - Recursively scans subfolders for `.jpg`, `.jpeg`, and `.png` images.
   - Automatically skips macOS resource forks (`._*`, `.DS_Store`), hidden directories, and corrupted images.
@@ -41,7 +43,16 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-python scan.py --folder /path/to/underwater/photos
+# 1. Local Mode (Apple Silicon MPS + iNaturalist 2021 model)
+python scan.py --folder /path/to/underwater/photos --mode local
+
+# 2. Gemini Flash Vision API Mode (North Sulawesi context)
+export GEMINI_API_KEY="your_api_key"
+python scan.py --folder /path/to/underwater/photos --mode gemini
+
+# 3. OpenAI Vision API Mode (GPT-4o-mini / GPT-4o)
+export OPENAI_API_KEY="your_api_key"
+python scan.py --folder /path/to/underwater/photos --mode openai
 ```
 
 The report is generated at `/path/to/underwater/photos/DETECTION.md`.

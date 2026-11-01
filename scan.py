@@ -10,11 +10,13 @@ Generates a DETECTION.md report at the root of the target folder.
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import io
 import json
 import logging
 import os
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -33,6 +35,30 @@ logger = logging.getLogger("underwater-scan")
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 DEFAULT_LOCAL_MODEL = "hf-hub:timm/eva02_large_patch14_clip_336.merged2b_ft_inat21"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+
+SYSTEM_PROMPT_SULAWESI = """You are a world-renowned marine biologist specializing in the Indo-Pacific region, specifically North Sulawesi (Lembeh Strait muck diving and Bunaken National Park coral reefs).
+You have deep expertise in identifying:
+- Nudibranchs, pleurobranchs, flatworms, and opisthobranchs (Chromodorididae, Phyllidiidae, Flabellinidae, Polyceridae, Pleurobranchidae, etc.)
+- Cryptic macro fauna of Lembeh Strait (frogfishes/Antennariidae, pygmy seahorses, ghost pipefishes/Solenostomidae, mimic/wonderpus/blue-ringed octopuses, harlequin/emperor/crinoid shrimps, scorpionfishes/Rhinopias, pipefishes)
+- Coral reef fishes of Bunaken (butterflyfishes, angelfishes, wrasses, damselfishes, triggerfishes, moray eels, gobies, blennies).
+
+Analyze the provided underwater image and return ONLY a valid JSON object strictly matching this schema:
+{
+  "predictions": [
+    {
+      "scientific_name": "Genus species (e.g., Chromodoris annae)",
+      "common_name": "Vernacular common name (e.g., Anna's Chromodoris)",
+      "family": "Taxonomic family (e.g., Chromodorididae)",
+      "confidence": 92.5
+    }
+  ]
+}
+Guidelines:
+- Provide between 3 and 5 hypotheses sorted by decreasing confidence (`confidence` between 0 and 100).
+- If multiple species are visible, focus on the primary subject of the photograph.
+- Output no text outside the JSON object."""
 
 
 # ==============================================================================
@@ -294,6 +320,150 @@ class LocalTimmINatClassifier(BaseClassifier):
         return hypotheses
 
 
+def _parse_json_predictions(raw_text: str, top_k: int = 5) -> List[SpeciesHypothesis]:
+    """Extract and validate a list of `SpeciesHypothesis` from an LLM JSON response."""
+    cleaned = raw_text.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    data = json.loads(cleaned)
+    preds = data.get("predictions", [])
+    hypotheses: List[SpeciesHypothesis] = []
+
+    for item in preds[:top_k]:
+        hypotheses.append(
+            SpeciesHypothesis(
+                scientific_name=str(item.get("scientific_name", "Unknown")).strip(),
+                common_name=str(item.get("common_name", "Unknown")).strip(),
+                family=str(item.get("family", "Unknown")).strip(),
+                confidence=round(float(item.get("confidence", 0.0)), 1),
+            )
+        )
+    return hypotheses
+
+
+class GeminiVisionClassifier(BaseClassifier):
+    """
+    Vision classifier using the Google Gemini API (`gemini-2.5-flash` by default)
+    with a North Sulawesi (Lembeh / Bunaken) marine biology system prompt.
+    """
+
+    def __init__(
+        self,
+        model_name: str = DEFAULT_GEMINI_MODEL,
+        api_key: Optional[str] = None,
+    ) -> None:
+        self.api_key = (
+            api_key
+            or os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY")
+        )
+        if not self.api_key:
+            raise RuntimeError(
+                "Missing Gemini API key. Set the GEMINI_API_KEY environment variable "
+                "or pass --api-key."
+            )
+
+        try:
+            from google import genai
+            from google.genai import types
+        except ImportError as exc:
+            raise RuntimeError(
+                "The `google-genai` SDK is required for gemini mode.\n"
+                "Install it with: pip install google-genai pillow"
+            ) from exc
+
+        self.genai = genai
+        self.types = types
+        self.client = genai.Client(api_key=self.api_key)
+        self.model_name = model_name
+        self.model_label = f"Google Gemini API (`{model_name}` — North Sulawesi Context)"
+
+    def predict(self, img: Image.Image, top_k: int = 5) -> List[SpeciesHypothesis]:
+        jpeg_bytes = image_to_jpeg_bytes(img)
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=[
+                self.types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
+                (
+                    "Identify the marine species in this underwater photograph taken in "
+                    f"North Sulawesi (Lembeh/Bunaken). Return the top {top_k} hypotheses in JSON."
+                ),
+            ],
+            config=self.types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT_SULAWESI,
+                response_mime_type="application/json",
+                temperature=0.1,
+            ),
+        )
+        return _parse_json_predictions(response.text, top_k=top_k)
+
+
+class OpenAIVisionClassifier(BaseClassifier):
+    """
+    Vision classifier using the OpenAI Vision API (`gpt-4o-mini` or `gpt-4o`)
+    with a North Sulawesi (Lembeh / Bunaken) marine biology system prompt.
+    """
+
+    def __init__(
+        self,
+        model_name: str = DEFAULT_OPENAI_MODEL,
+        api_key: Optional[str] = None,
+    ) -> None:
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not self.api_key:
+            raise RuntimeError(
+                "Missing OpenAI API key. Set the OPENAI_API_KEY environment variable "
+                "or pass --api-key."
+            )
+
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "The `openai` SDK is required for openai mode.\n"
+                "Install it with: pip install openai pillow"
+            ) from exc
+
+        self.client = OpenAI(api_key=self.api_key)
+        self.model_name = model_name
+        self.model_label = f"OpenAI Vision API (`{model_name}` — North Sulawesi Context)"
+
+    def predict(self, img: Image.Image, top_k: int = 5) -> List[SpeciesHypothesis]:
+        jpeg_bytes = image_to_jpeg_bytes(img)
+        b64_img = base64.b64encode(jpeg_bytes).decode("utf-8")
+
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            response_format={"type": "json_object"},
+            temperature=0.1,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_SULAWESI},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Identify the marine species in this underwater photograph taken in "
+                                f"North Sulawesi (Lembeh/Bunaken). Return the top {top_k} hypotheses in JSON."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{b64_img}",
+                                "detail": "high",
+                            },
+                        },
+                    ],
+                },
+            ],
+        )
+        content = response.choices[0].message.content or "{}"
+        return _parse_json_predictions(content, top_k=top_k)
+
+
 # ==============================================================================
 # Markdown Report Formatting
 # ==============================================================================
@@ -380,15 +550,24 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         "-m",
-        choices=["local"],
+        choices=["local", "gemini", "openai"],
         default="local",
-        help="Inference mode: 'local' (PyTorch MPS + iNaturalist 2021, zero cost).",
+        help=(
+            "Inference mode: 'local' (PyTorch MPS + iNaturalist 2021, zero cost), "
+            "'gemini' (Gemini Flash API with Sulawesi context), or 'openai' (GPT-4o Vision)."
+        ),
     )
     parser.add_argument(
         "--model",
         type=str,
         default=None,
-        help="Override the model identifier.",
+        help="Override the model identifier (e.g., 'gemini-2.5-pro' or another timm checkpoint).",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="API key for Gemini or OpenAI (otherwise read from GEMINI_API_KEY / OPENAI_API_KEY).",
     )
     parser.add_argument(
         "--top-k",
@@ -418,6 +597,12 @@ def create_classifier(args: argparse.Namespace) -> BaseClassifier:
             model_name=model_name,
             enrich_taxonomy=not args.offline_taxonomy,
         )
+    if args.mode == "gemini":
+        model_name = args.model or DEFAULT_GEMINI_MODEL
+        return GeminiVisionClassifier(model_name=model_name, api_key=args.api_key)
+    if args.mode == "openai":
+        model_name = args.model or DEFAULT_OPENAI_MODEL
+        return OpenAIVisionClassifier(model_name=model_name, api_key=args.api_key)
     raise ValueError(f"Unknown mode: {args.mode}")
 
 

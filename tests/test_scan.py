@@ -77,6 +77,37 @@ class TestScanCore(unittest.TestCase):
         self.assertIn("`Pomacentridae`", md)
         self.assertIn("*Amphiprion percula*", md)
 
+    def test_parse_json_predictions_handles_markdown_fences(self) -> None:
+        raw = """```json
+        {
+          "predictions": [
+            {
+              "scientific_name": "Hippocampus bargibanti",
+              "common_name": "Bargibant's Pygmy Seahorse",
+              "family": "Syngnathidae",
+              "confidence": 94.2
+            },
+            {
+              "scientific_name": "Hippocampus denise",
+              "common_name": "Denise's Pygmy Seahorse",
+              "family": "Syngnathidae",
+              "confidence": 5.1
+            }
+          ]
+        }
+        ```"""
+        preds = scan._parse_json_predictions(raw, top_k=1)
+        self.assertEqual(len(preds), 1)
+        self.assertEqual(preds[0].scientific_name, "Hippocampus bargibanti")
+        self.assertEqual(preds[0].family, "Syngnathidae")
+        self.assertAlmostEqual(preds[0].confidence, 94.2)
+
+    def test_api_classifiers_require_api_key(self) -> None:
+        with self.assertRaises(RuntimeError):
+            scan.GeminiVisionClassifier(api_key=None)
+        with self.assertRaises(RuntimeError):
+            scan.OpenAIVisionClassifier(api_key=None)
+
 
 if __name__ == "__main__":
     unittest.main()
