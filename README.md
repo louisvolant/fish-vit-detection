@@ -125,6 +125,23 @@ python scan.py --folder /path/to/underwater/photos --mode openai --existing ask 
 
 The report is generated at `/path/to/underwater/photos/DETECTION.md`.
 
+---
+
+## Converting an Existing `DETECTION.md` (`oneline` $\leftrightarrow$ `expand`)
+
+Use `convert_report.py` to instantly transform an existing `DETECTION.md` between the **detailed multi-line + table** format and the **compact single-line** format without re-running model inference:
+
+```bash
+# Compress an existing DETECTION.md into single-line entries (in-place)
+python convert_report.py --folder /path/to/underwater/photos --oneline
+
+# Expand a single-line DETECTION.md back into full sections + Markdown tables (in-place)
+python convert_report.py --folder /path/to/underwater/photos --expand
+
+# Or specify a direct input file and write to a separate output file
+python convert_report.py --file /path/to/DETECTION.md --oneline --output /path/to/DETECTION_ONELINE.md
+```
+
 ### Running Tests
 
 ```bash

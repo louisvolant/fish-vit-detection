@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from PIL import Image, UnidentifiedImageError
 
+import convert_report
 import scan
 
 
@@ -274,6 +275,64 @@ class TestScanCore(unittest.TestCase):
 
         args = scan.parse_args(["--folder", "/tmp/photos", "--oneline"])
         self.assertTrue(args.oneline)
+
+    def test_convert_report_roundtrip_expanded_to_oneline_and_back(self) -> None:
+        rel_name = "2026-07-16_09-17-18 - TG-7 - Sulawesi - Plongée sur Lembeh - Angels Window 11.jpeg"
+        result_1 = scan.ImagePredictionResult(
+            rel_path=rel_name,
+            hypotheses=[
+                scan.SpeciesHypothesis(
+                    scientific_name="Triaenodon obesus",
+                    common_name="Requin-corail",
+                    family="Carcharhinidae",
+                    confidence=38.2,
+                ),
+                scan.SpeciesHypothesis(
+                    scientific_name="Carcharias taurus",
+                    common_name="Requin-taureau",
+                    family="Carchariidae",
+                    confidence=21.0,
+                ),
+                scan.SpeciesHypothesis(
+                    scientific_name="Aulostomus chinensis",
+                    common_name="Poisson-trompette Indo-Pacifique",
+                    family="Aulostomidae",
+                    confidence=10.7,
+                ),
+            ],
+        )
+        result_2 = scan.ImagePredictionResult(
+            rel_path="sub/low_conf.jpg",
+            hypotheses=[],
+        )
+
+        header = scan.build_markdown_header(Path("/tmp/lembeh"), "TestModel", 2, lang="fr")
+        expanded_doc = (
+            header
+            + scan.format_prediction_entry(result_1, lang="fr", oneline=False)
+            + scan.format_prediction_entry(result_2, lang="fr", oneline=False)
+        )
+
+        # Convert expanded -> oneline
+        oneline_doc, count_1 = convert_report.convert_markdown_content(
+            expanded_doc, target_mode="oneline"
+        )
+        self.assertEqual(count_1, 2)
+        self.assertNotIn("### 📷", oneline_doc)
+        self.assertIn(
+            f"{rel_name} : **[Triaenodon obesus]** (*Requin-corail*) "
+            "(**Famille taxonomique:** `Carcharhinidae`) — **Confiance: 38.2%** / "
+            "**Alternatives:** *Carcharias taurus* (Requin-taureau, Carchariidae — 21.0%), "
+            "*Aulostomus chinensis* (Poisson-trompette Indo-Pacifique, Aulostomidae — 10.7%)",
+            oneline_doc,
+        )
+
+        # Convert oneline -> expand
+        re_expanded_doc, count_2 = convert_report.convert_markdown_content(
+            oneline_doc, target_mode="expand"
+        )
+        self.assertEqual(count_2, 2)
+        self.assertEqual(re_expanded_doc, expanded_doc)
 
 
 if __name__ == "__main__":
